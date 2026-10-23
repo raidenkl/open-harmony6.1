@@ -1,0 +1,53 @@
+diff --git a/rk3568/hardware/display/src/display_device/drm_device.cpp b/rk3568/hardware/display/src/display_device/drm_device.cpp
+index 9628213..336af0a 100644
+--- a/rk3568/hardware/display/src/display_device/drm_device.cpp
++++ b/rk3568/hardware/display/src/display_device/drm_device.cpp
+@@ -17,6 +17,7 @@
+ #include <string>
+ #include <cerrno>
+ #include <fcntl.h>
++#include <unistd.h>
+ #include <memory>
+ #include <drm_fourcc.h>
+ #include "display_log.h"
+@@ -33,9 +34,22 @@ std::shared_ptr<HdiDeviceInterface> DrmDevice::Create()
+     DISPLAY_LOGD();
+     if (mDrmFd == nullptr) {
+         const std::string name("rockchip");
+-        int drmFd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC); // drmOpen(name.c_str(), nullptr);
++        int drmFd = -1;
++        /* ueventd 创建 /dev/dri/card0 与 composer_host 启动存在竞态：
++         * 首启时节点可能还没出来(ENOENT)，重试几次即可自愈。
++         * 每次失败都把 errno 打出来，避免"崩了但不知道为什么"，
++         * 也避免 errno 被后续调用覆盖。 */
++        for (int retry = 0; retry < 3; retry++) {
++            drmFd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC); // drmOpen(name.c_str(), nullptr);
++            if (drmFd >= 0) {
++                break;
++            }
++            int err = errno;
++            DISPLAY_LOGE("drm file:%{public}s open failed try %{public}d errno %{public}d %{public}s",
++                name.c_str(), retry, err, strerror(err));
++            usleep(100000); // 100ms
++        }
+         if (drmFd < 0) {
+-            DISPLAY_LOGE("drm file:%{public}s open failed %{public}s", name.c_str(), strerror(errno));
+             return nullptr;
+         }
+         DISPLAY_LOGD("the drm fd is %{public}d", drmFd);
+diff --git a/rk3568/hardware/display/src/display_device/hdi_device_interface.cpp b/rk3568/hardware/display/src/display_device/hdi_device_interface.cpp
+index 44de859..3f08146 100644
+--- a/rk3568/hardware/display/src/display_device/hdi_device_interface.cpp
++++ b/rk3568/hardware/display/src/display_device/hdi_device_interface.cpp
+@@ -28,7 +28,10 @@ std::vector<std::shared_ptr<HdiDeviceInterface>> HdiDeviceInterface::DiscoveryDe
+     std::vector<std::shared_ptr<HdiDeviceInterface>> devices;
+     std::shared_ptr<HdiDeviceInterface> drmDevice = DrmDevice::Create();
+     if (!drmDevice) {
+-        DISPLAY_LOGE("can not create drm device");
++        /* vendor 缺陷：原来只打印就继续 -> drmDevice->Init() 在 nullptr 上取 vtable，SIGSEGV。
++         * 崩溃循环会让 init 反复拉起 composer_host，且 hilog 里留不下 errno。 */
++        DISPLAY_LOGE("can not create drm device, skip init");
++        return devices;
+     }
+     ret = drmDevice->Init();
+     if (ret == DISPLAY_SUCCESS) {

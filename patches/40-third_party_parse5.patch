@@ -1,0 +1,12 @@
+diff --git a/packages/parse5/tsconfig.json b/packages/parse5/tsconfig.json
+index 59de23d..9aa0187 100644
+--- a/packages/parse5/tsconfig.json
++++ b/packages/parse5/tsconfig.json
+@@ -1,6 +1,7 @@
+ {
+     "extends": "../../tsconfig.json",
+     "compilerOptions": {
++        "types": [],
+         "rootDir": "lib",
+         "outDir": "dist",
+         "lib": [
